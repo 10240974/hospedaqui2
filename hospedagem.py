@@ -127,7 +127,7 @@ st.sidebar.title("📌 Menu Principal*")
 menu_principal = st.sidebar.radio("", [
     "🏠 Dashboard",
     "📊 Relatórios",
-    "🗂 Gestão de Dados",
+    "🗂 Gestão de Dadoss",
     "⚙️ Configurações"
 ])
 
