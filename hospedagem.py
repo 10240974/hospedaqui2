@@ -527,7 +527,7 @@ elif aba == "Despesas":
                 conn.close()
                 st.success(f"Despesa {id_excluir} excluída!")
 
-        st.subheader("Copiar Despesa")
+        st.subheader("Copiar Despesas")
         if not despesas_filtradas.empty:
             id_copiar = st.selectbox("Selecione o ID da despesa para copiar", despesas_filtradas["id"], key="copiar_despesa")
             if st.button("Copiar Despesa"):
