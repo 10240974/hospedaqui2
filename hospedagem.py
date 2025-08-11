@@ -8,7 +8,7 @@ import unicodedata
 import re
 
 # ---------- CONFIGURAÇÃO DA PÁGINA ----------
-st.set_page_config(page_title="Controle de Hospedagem", layout="wide")
+st.set_page_config(page_title="Controle de Hospedagem 4.0", layout="wide")
 
 # ---------- BANCO DE DADOS ----------
 def conectar():
@@ -527,7 +527,7 @@ elif aba == "Despesas":
                 conn.close()
                 st.success(f"Despesa {id_excluir} excluída!")
 
-        st.subheader("Copiar Despesas")
+        st.subheader("Copiar Despesassss")
         if not despesas_filtradas.empty:
             id_copiar = st.selectbox("Selecione o ID da despesa para copiar", despesas_filtradas["id"], key="copiar_despesa")
             if st.button("Copiar Despesa"):
