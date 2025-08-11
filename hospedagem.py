@@ -4,7 +4,8 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 from datetime import date
-import unicodedata  # <- para normalizar nomes de unidade
+import unicodedata
+import re
 
 # ---------- CONFIGURAÇÃO DA PÁGINA ----------
 st.set_page_config(page_title="Controle de Hospedagem", layout="wide")
@@ -16,7 +17,6 @@ def conectar():
 def inicializar_db():
     conn = conectar()
     c = conn.cursor()
-    # Unidades
     c.execute("""
         CREATE TABLE IF NOT EXISTS unidades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +26,6 @@ def inicializar_db():
             status TEXT
         )
     """)
-    # Locações
     c.execute("""
         CREATE TABLE IF NOT EXISTS locacoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +39,6 @@ def inicializar_db():
             FOREIGN KEY(unidade_id) REFERENCES unidades(id)
         )
     """)
-    # Despesas
     c.execute("""
         CREATE TABLE IF NOT EXISTS despesas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +50,6 @@ def inicializar_db():
             FOREIGN KEY(unidade_id) REFERENCES unidades(id)
         )
     """)
-    # Precificação
     c.execute("""
         CREATE TABLE IF NOT EXISTS precos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,14 +90,40 @@ def get_precos():
     return df
 
 def _norm(s: str) -> str:
-    """Normaliza string para comparações (sem acento, lower, trim)."""
     s = str(s or "").strip().lower()
     s = unicodedata.normalize("NFKD", s)
     return "".join(ch for ch in s if not unicodedata.combining(ch))
 
+def parse_valor_cell(x) -> float:
+    """Converte strings de dinheiro em float. Suporta 'R$ 1.234,56', '1,234.56', '1234,56', '1234.56', '(1.234,56)'. """
+    if x is None:
+        return 0.0
+    s = str(x).strip()
+    if s == "" or s.lower() in {"nan", "none"}:
+        return 0.0
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg = True
+        s = s[1:-1]
+    s = re.sub(r"[^\d,.\-]", "", s)
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        v = float(s)
+        return -v if neg else v
+    except Exception:
+        return 0.0
+
+def parse_valor_series(series: pd.Series) -> pd.Series:
+    return series.apply(parse_valor_cell)
+
 # ---------- MENU LATERAL OTIMIZADO ----------
 st.sidebar.title("📌 Menu Principal")
-
 menu_principal = st.sidebar.radio("", [
     "🏠 Dashboard",
     "📊 Relatórios",
@@ -110,13 +133,11 @@ menu_principal = st.sidebar.radio("", [
 
 if menu_principal == "🏠 Dashboard":
     aba = "Dashboard de Ocupação"
-
 elif menu_principal == "📊 Relatórios":
     aba = st.sidebar.radio("📈 Tipo de Relatório", [
         "Relatório de Despesas",
         "Análise de Receita e Lucro"
     ])
-
 elif menu_principal == "🗂 Gestão de Dados":
     aba = st.sidebar.radio("📁 Dados Cadastrais", [
         "Cadastro de Unidades",
@@ -124,8 +145,7 @@ elif menu_principal == "🗂 Gestão de Dados":
         "Despesas",
         "Precificação"
     ])
-
-elif menu_principal == "⚙️ Configurações":
+else:
     aba = st.sidebar.radio("🔧 Opções do Sistema", [
         "Parâmetros do Sistema",
         "Exportar/Importar Dados",
@@ -139,7 +159,6 @@ if aba == "Dashboard de Ocupação":
     st.title("🏠 Dashboard de Ocupação - Visão Geral")
 
     ano_dash = st.number_input("Ano", min_value=2000, max_value=2100, value=date.today().year)
-
     unidades_dash = get_unidades()
     locacoes_dash = get_locacoes()
 
@@ -150,48 +169,39 @@ if aba == "Dashboard de Ocupação":
     with col2:
         data_fim = st.date_input("Data final", value=date.today())
 
-    # Faixa de dias do período
     dias_periodo = pd.date_range(start=data_inicio, end=data_fim, freq="D")
     dias_str = [d.strftime("%d/%m") for d in dias_periodo]
 
-    # Filtro de unidades
     unidades_opcoes = unidades_dash["nome"].tolist() if not unidades_dash.empty else []
     unidades_selecionadas = st.multiselect("Unidades", unidades_opcoes, default=unidades_opcoes)
 
-    # Aplica filtro de unidades para exibição
     if unidades_selecionadas:
         unidades_dash_filtrado = unidades_dash[unidades_dash["nome"].isin(unidades_selecionadas)]
     else:
         unidades_dash_filtrado = unidades_dash
 
-    # Filtro de plataforma
     plataformas_opcoes = ["Todas"]
     if not locacoes_dash.empty and "plataforma" in locacoes_dash.columns:
         plataformas_opcoes += sorted([p for p in locacoes_dash["plataforma"].dropna().unique().tolist()])
     plataforma_filtro = st.selectbox("Plataforma", plataformas_opcoes, key="dash_plataforma")
 
-    # Filtro de unidade por nome (para filtrar locações)
     unidade_filtro = st.selectbox(
         "Unidade",
         ["Todas"] + (unidades_dash["nome"].tolist() if not unidades_dash.empty else []),
         key="dash_unidade_filtro"
     )
 
-    # Aplica filtro de unidade nas locações (por ID)
     if unidade_filtro != "Todas" and not unidades_dash.empty and not locacoes_dash.empty:
         unidade_id = unidades_dash.loc[unidades_dash["nome"] == unidade_filtro, "id"].values[0]
         locacoes_dash = locacoes_dash[locacoes_dash["unidade_id"] == unidade_id]
 
-    # Aplica filtro de plataforma nas locações
     if plataforma_filtro != "Todas" and not locacoes_dash.empty:
         locacoes_dash = locacoes_dash[locacoes_dash["plataforma"] == plataforma_filtro]
 
-    # Matrizes base (numéricas para cálculo e visuais para exibição)
     index_nomes = unidades_dash_filtrado["nome"].tolist() + ["Total R$"]
-    valores_num = pd.DataFrame(0.0, index=index_nomes, columns=dias_str)  # só dias
-    tabela_icon = pd.DataFrame("", index=index_nomes, columns=dias_str)    # só dias
+    valores_num = pd.DataFrame(0.0, index=index_nomes, columns=dias_str)
+    tabela_icon = pd.DataFrame("", index=index_nomes, columns=dias_str)
 
-    # Preenche ocupação e valores
     if not unidades_dash_filtrado.empty and not locacoes_dash.empty:
         for _, unidade in unidades_dash_filtrado.iterrows():
             locs = locacoes_dash[locacoes_dash["unidade_id"] == unidade["id"]]
@@ -199,13 +209,11 @@ if aba == "Dashboard de Ocupação":
                 checkin = pd.to_datetime(loc["checkin"]).date()
                 checkout = pd.to_datetime(loc["checkout"]).date()
                 valor = float(loc.get("valor", 0) or 0)
-
                 if checkin == checkout:
                     dias_locados = []
                 else:
                     dr = pd.date_range(checkin, checkout - pd.Timedelta(days=1), freq="D").to_pydatetime()
                     dias_locados = [d.date() for d in dr]
-
                 valor_dia = (valor / len(dias_locados)) if len(dias_locados) > 0 else 0.0
 
                 for d in dias_locados:
@@ -218,19 +226,16 @@ if aba == "Dashboard de Ocupação":
                     dia_checkin = checkin.strftime("%d/%m")
                     if dia_checkin in dias_str:
                         tabela_icon.loc[unidade["nome"], dia_checkin] = "🟦"
-
                 if data_inicio <= checkout <= data_fim:
                     dia_checkout = checkout.strftime("%d/%m")
                     if dia_checkout in dias_str:
                         tabela_icon.loc[unidade["nome"], dia_checkout] = "◧"
 
-    # Totais por linha e por coluna
     valores_num.loc["Total R$", dias_str] = valores_num[dias_str].sum(axis=0)
     valores_num["Total R$"] = valores_num[dias_str].sum(axis=1)
     valores_num["Valor Líquido (-13%)"] = valores_num["Total R$"] * 0.87
     valores_num["Total Administradora (20%)"] = valores_num["Total R$"] * 0.20
 
-    # Monta a tabela visual (ícones + valores diários + colunas finais formatadas)
     tabela_visual = tabela_icon.copy()
     for extra_col in ["Total R$", "Valor Líquido (-13%)", "Total Administradora (20%)"]:
         if extra_col not in tabela_visual.columns:
@@ -250,7 +255,6 @@ if aba == "Dashboard de Ocupação":
 
     st.markdown(f"**Ocupação Geral ({data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')})**")
     st.dataframe(tabela_visual, use_container_width=True)
-
     st.markdown("""
 **Legenda:**
 - 🟧 Ocupado o dia todo (com valor)  
@@ -278,7 +282,6 @@ elif aba == "Cadastro de Unidades":
             conn.commit()
             conn.close()
             st.success("Unidade cadastrada!")
-
     st.subheader("Unidades Cadastradas")
     st.dataframe(get_unidades(), use_container_width=True)
 
@@ -312,37 +315,39 @@ elif aba == "Locações":
 
     # ------ Importação CSV com ; ------
     st.subheader("Importar Locações (CSV com ;)")
+
+    # Modo de importação
+    modo_import = st.radio(
+        "Modo de importação",
+        ["Acrescentar (append)", "Sobrescrever (limpar antes)"],
+        horizontal=True
+    )
+
     csv_file = st.file_uploader("Selecione o CSV", type=["csv"])
 
     if csv_file is not None:
         try:
-            # força separador ';' e encoding Windows
             df_csv = pd.read_csv(csv_file, sep=";", encoding="latin-1", dtype=str)
         except UnicodeDecodeError:
-            # fallback pra UTF-8 se necessário
             df_csv = pd.read_csv(csv_file, sep=";", encoding="utf-8-sig", dtype=str)
 
-        # Padroniza colunas
         df_csv.columns = [c.strip().lower() for c in df_csv.columns]
         df_csv = df_csv.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
-        # Mapeamento flexível de cabeçalhos
         alias = {
             "unidade": ["unidade", "unit", "nome_unidade", "apto", "apartamento", "imovel", "imóvel"],
             "checkin": ["checkin", "check-in", "data_checkin", "entrada", "inicio", "início"],
             "checkout": ["checkout", "check-out", "data_checkout", "saida", "saída", "fim", "final"],
             "hospede": ["hospede", "hóspede", "cliente", "nome_hospede"],
-            "valor": ["valor", "valor_total", "preco", "preço", "amount"],
+            "valor": ["valor", "valor_total", "preco", "preço", "amount", "price"],
             "plataforma": ["plataforma", "canal", "origem"],
             "status_pagamento": ["status_pagamento", "pagamento", "status", "payment_status"]
         }
-
         def pick(col_alts):
             for c in col_alts:
                 if c in df_csv.columns:
                     return c
             return None
-
         selected = {k: pick(v) for k, v in alias.items()}
         rename_map = {v: k for k, v in selected.items() if v is not None}
         df_csv = df_csv.rename(columns=rename_map)
@@ -350,24 +355,27 @@ elif aba == "Locações":
         obrigatorias = ["unidade", "checkin", "checkout"]
         faltando = [c for c in obrigatorias if c not in df_csv.columns]
         st.info(f"Colunas lidas: {list(df_csv.columns)}")
+
         if faltando:
             st.error(f"Faltam colunas obrigatórias no CSV: {', '.join(faltando)}")
         else:
-            # Normaliza datas e valor
             for col in ["checkin", "checkout"]:
                 df_csv[col] = pd.to_datetime(df_csv[col], dayfirst=True, errors="coerce").dt.date
 
             if "valor" in df_csv.columns:
-                df_csv["valor"] = (
-                    df_csv["valor"]
-                    .astype(str)
-                    .str.replace(r"\.", "", regex=True)
-                    .str.replace(",", ".", regex=False)
-                )
-                df_csv["valor"] = pd.to_numeric(df_csv["valor"], errors="coerce").fillna(0.0)
+                df_csv["valor"] = parse_valor_series(df_csv["valor"])
+            else:
+                df_csv["valor"] = 0.0
 
-            df_csv["plataforma"] = df_csv.get("plataforma", "Direto").fillna("Direto")
-            df_csv["status_pagamento"] = df_csv.get("status_pagamento", "Pendente").fillna("Pendente")
+            if "plataforma" not in df_csv.columns:
+                df_csv["plataforma"] = "Direto"
+            else:
+                df_csv["plataforma"] = df_csv["plataforma"].fillna("Direto").astype(str)
+
+            if "status_pagamento" not in df_csv.columns:
+                df_csv["status_pagamento"] = "Pendente"
+            else:
+                df_csv["status_pagamento"] = df_csv["status_pagamento"].fillna("Pendente").astype(str)
 
             st.dataframe(df_csv.head(30), use_container_width=True)
 
@@ -376,14 +384,17 @@ elif aba == "Locações":
                 if unidades_df.empty:
                     st.error("Não há unidades cadastradas. Cadastre antes de importar.")
                 else:
+                    conn = conectar(); cur = conn.cursor()
+                    if modo_import == "Sobrescrever (limpar antes)":
+                        cur.execute("DELETE FROM locacoes")
+                        conn.commit()
+
                     mapa_unidade = {_norm(n): int(i) for n, i in zip(unidades_df["nome"], unidades_df["id"])}
                     inseridos, pulados = 0, 0
-                    conn = conectar(); cur = conn.cursor()
                     for _, row in df_csv.iterrows():
                         try:
                             uid = mapa_unidade.get(_norm(row.get("unidade")))
-                            ci = row.get("checkin")
-                            co = row.get("checkout")
+                            ci = row.get("checkin"); co = row.get("checkout")
                             if not uid or pd.isna(ci) or pd.isna(co):
                                 pulados += 1
                                 continue
@@ -400,7 +411,8 @@ elif aba == "Locações":
                             pulados += 1
                             continue
                     conn.commit(); conn.close()
-                    st.success(f"Importação concluída. Inseridos: {inseridos} | Pulados: {pulados}")
+                    msg_pref = " (tabela limpa antes)" if modo_import == "Sobrescrever (limpar antes)" else " (adicionados)"
+                    st.success(f"Importação concluída{msg_pref}. Inseridos: {inseridos} | Pulados: {pulados}")
 
     # ------ Listagem / Edição / Exclusão ------
     st.subheader("Locações Registradas")
@@ -476,7 +488,6 @@ elif aba == "Despesas":
     if not despesas.empty and not unidades.empty:
         despesas = despesas.merge(unidades, left_on="unidade_id", right_on="id", suffixes=("", "_unidade"))
 
-        # Filtros
         unidades_opcoes = unidades["nome"].tolist()
         unidade_filtro = st.selectbox("Filtrar por unidade", ["Todas"] + unidades_opcoes, key="despesa_unidade_filtro")
         meses_lista = ["Todos"] + [str(m).zfill(2) for m in range(1, 13)]
