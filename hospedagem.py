@@ -8,7 +8,7 @@ import unicodedata
 import re
 
 # ---------- CONFIGURAÇÃO DA PÁGINA ----------
-st.set_page_config(page_title="Controle de Hospedagem 4.0", layout="wide")
+st.set_page_config(page_title="Controle de Hospedagem 4.5", layout="wide")
 
 # ---------- BANCO DE DADOS ----------
 def conectar():
